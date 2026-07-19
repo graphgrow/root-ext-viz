@@ -1,6 +1,6 @@
 [project]
 name = "root-ext-viz"
-version = "0.1.0"
+version = "0.1.1"
 description = "Data-visualization MCP tool server: a sessional Python kernel (pandas/numpy/scipy/matplotlib/plotly/altair), Vega-Lite charts as source documents rendered locally by vl-convert, and engineering chart recipes. Compute and plot; outputs land only in derived or artifact directories."
 readme = "README.md"
 requires-python = ">=3.10"
