@@ -28,6 +28,15 @@ dev = ["pytest>=8"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# SKILL.md is model-facing instruction the client extracts from the wheel
+# at install (ADR-0025), so every build target must name it or it is
+# silently dropped. Declared globally, NOT on the wheel target alone:
+# `uv build` produces the sdist first and then builds the wheel FROM it,
+# so a wheel-only rule loses it on that path — the same version shipping
+# with or without its instructions depending on how it was built.
+[tool.hatch.build]
+artifacts = ["src/root_ext_viz/SKILL.md"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/root_ext_viz"]
 

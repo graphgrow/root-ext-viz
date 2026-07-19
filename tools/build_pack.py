@@ -65,6 +65,15 @@ def main() -> int:
         # except session_state (talks to the live kernel process);
         # session tools EXECUTE code / mutate kernel state and the
         # derived-writes create artifacts — all user-program writes.
+        # The pack's operating instructions (ADR-0025). Only the POINTER
+        # lives in the manifest; the text rides inside the wheel, whose
+        # sha256 this manifest pins — so the signature that covers the
+        # manifest covers the instructions too, with nothing extra to
+        # sign and one copy to keep in sync. Note what is absent: no
+        # field here grants a tool or widens a permission. A skill tells
+        # the model what to do; it can never change what it is allowed
+        # to do.
+        "skill": {"body": "root_ext_viz/SKILL.md"},
         "tools": [
             *(
                 {"name": name, "side_effect": "read", "posture": "sandboxed"}
