@@ -66,8 +66,15 @@ def session_state() -> dict:
 def py_run(code: str, wall_s: float = 60.0) -> dict:
     if not code.strip():
         raise ValueError("code is empty")
-    if not 1 <= wall_s <= 75:
-        raise ValueError("wall_s must be 1–75 (the bridge ceiling is 90)")
+    # The cap sits just under the session budget this pack's manifest
+    # declares (timeout_ms 600_000). Layers, in order: this wall kills a
+    # runaway CALL and respawns the interpreter, keeping the server — and
+    # so the client's warm session — alive; the client's budget is the
+    # outer bound and kills the server itself. Leaving room between them
+    # means a long analysis fails as a named state loss, not a dead
+    # session.
+    if not 1 <= wall_s <= 570:
+        raise ValueError("wall_s must be 1–570 (the session budget is 600 s)")
     reply = kernel.request({"op": "run", "code": code}, wall_s=wall_s)
     out = {
         "ok": bool(reply.get("ok")),

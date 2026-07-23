@@ -46,13 +46,15 @@ guess.
 Variables, imports and loaded frames persist across `py_run` calls. Load
 once, iterate cheaply.
 
-But a `py_run` that exceeds its wall budget (`wall_s`, max 75 s) **kills
+But a `py_run` that exceeds its wall budget (`wall_s`, max 570 s) **kills
 the whole kernel**, not just that call. Every loaded frame and every
 variable is gone, and the error says so. After a timeout you must
 `data_load` again before anything else will work. If you are unsure what
 survived, `session_state` tells you exactly what the kernel holds.
 
-Long work belongs in smaller `py_run` calls for this reason.
+Long work belongs in smaller `py_run` calls for this reason — and when a
+single step is genuinely big, raise `wall_s` for that call rather than
+shrinking the analysis to fit the default.
 
 ## Aggregate before you plot
 

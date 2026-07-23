@@ -1,12 +1,27 @@
 """The sessional kernel, parent side (the pack's design pillar A).
 
-One persistent child interpreter per server process — the bridge keeps
-MCP servers warm, so dataframes and imports SURVIVE across tool calls:
-load once, iterate. Bounds are honest and layered: the child sets
-memory/CPU rlimits on itself before user code runs; the WALL bound
-lives here — a call over its wall is killed and the whole kernel
-respawns empty, with the state loss named in the error rather than
-hidden.
+One persistent child interpreter per server process, so dataframes and
+imports SURVIVE across tool calls: load once, iterate.
+
+That survival is not something this pack can arrange on its own — it
+depends on the CLIENT holding this server process open between calls,
+so we ASK for it: the tools that use this kernel declare
+`session: "warm"` in the manifest (ADR-0026 §3), and ROOT grants it by
+keeping one confined server per pack alive, retiring it when the grant,
+the granted roots, or the pack itself changes. An earlier version of
+this docstring claimed "the bridge keeps MCP servers warm", which was
+true only by accident: warmth was a side effect of the transport the
+old `user-program` posture happened to pick, nothing declared it, and
+nothing would have said so when it stopped being true. A client that
+does not honor the grant simply gets a cold kernel each call — slower,
+never wrong.
+
+Bounds are honest and layered: the child sets memory/CPU rlimits on
+itself before user code runs; the WALL bound lives here — a call over
+its wall is killed and the whole kernel respawns empty, with the state
+loss named in the error rather than hidden. That inner kill keeps THIS
+server answering, so the client's warm session survives a runaway call;
+only a failure of the server itself costs the session.
 """
 
 from __future__ import annotations

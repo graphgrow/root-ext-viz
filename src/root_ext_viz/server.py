@@ -90,7 +90,7 @@ def py_run(code: str, wall_s: float = 60.0) -> dict:
     next call. Use it to transform/aggregate before charting, or run a
     python recipe (matplotlib figures: savefig to an absolute path in
     the artifact scratch). Resource-capped (memory rlimit + your
-    wall_s, max 75s); a timeout kills the kernel and names the state
+    wall_s, max 570s); a timeout kills the kernel and names the state
     loss. stdout/stderr come back bounded."""
     from . import data
 
