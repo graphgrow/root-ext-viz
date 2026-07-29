@@ -26,18 +26,37 @@ DEFAULT_KEY = pathlib.Path(
 ).expanduser()
 
 
+def _project_version() -> str:
+    """The version in pyproject.toml, not whatever wheel sorts last.
+
+    `sorted()` is lexicographic, so "0.10.0" sorts BEFORE "0.5.1" and
+    taking `[-1]` silently packaged a stale wheel the moment a pack
+    reached 0.10. Caught in drone-eng, which built `drone-eng-0.5.1.rootx`
+    from a tree whose source said 0.10.0 — signed and catalogued as a
+    release. Naming the wheel we want removes the guess, and also catches
+    a dist/ that was simply never rebuilt.
+    """
+    text = (ROOT / "pyproject.toml").read_text()
+    match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    if not match:
+        raise SystemExit("no version in pyproject.toml")
+    return match.group(1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--key", type=pathlib.Path, default=DEFAULT_KEY)
     parser.add_argument("--unsigned", action="store_true")
     args = parser.parse_args()
 
-    wheels = sorted((ROOT / "dist").glob("root_ext_viz-*-py3-none-any.whl"))
-    if not wheels:
-        print("no wheel in dist/ — run `uv build` first", file=sys.stderr)
+    version = _project_version()
+    wheel = ROOT / "dist" / f"root_ext_viz-{version}-py3-none-any.whl"
+    if not wheel.is_file():
+        print(
+            f"no wheel for {version} in dist/ — run `uv build` first",
+            file=sys.stderr,
+        )
         return 1
-    wheel = wheels[-1]
-    version = wheel.name.split("-")[1]
     sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
 
     # A stale wheel in dist/ is packaged silently: bump the version, forget
