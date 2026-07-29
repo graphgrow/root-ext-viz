@@ -12,6 +12,75 @@ VL = "vega_lite"
 PY = "python"
 
 RECIPES: dict[str, dict] = {
+    "small_multiples": {
+        "kind": VL,
+        "for": (
+            "one computation shown across many conditions — a parameter sweep, "
+            "a set of runs, timesteps of a simulation. The form an AGENT can "
+            "actually read: an animation shows one frame at a time, a grid "
+            "shows all of them at once and invites the comparison"
+        ),
+        "notes": (
+            "Three things that go wrong quietly. (1) `columns` belongs at the "
+            "TOP level, beside `facet` — nested inside it, it is silently "
+            "ignored and every panel lands in one row. (2) A facet field that "
+            "is a STRING sorts alphabetically, so a sweep labelled kp=1, kp=2, "
+            "kp=16 renders as 1, 16, 2 — facet on the numeric field, or give "
+            "an explicit sort. A sweep shown out of order reads as noise. "
+            "(3) Scales are shared by default, which is what makes panels "
+            "comparable; set resolve.scale.y='independent' only when they "
+            "genuinely measure different things, and say so when you do."
+        ),
+        "template": {
+            "columns": 3,
+            "facet": {"field": "run", "type": "nominal", "title": None},
+            "spec": {
+                "width": 160,
+                "height": 110,
+                "mark": "line",
+                "encoding": {
+                    "x": {"field": "t", "type": "quantitative"},
+                    "y": {"field": "value", "type": "quantitative"},
+                },
+            },
+        },
+    },
+    "time_scrubber": {
+        "kind": VL,
+        "for": (
+            "a time series a HUMAN wants to scrub through. Export it with "
+            "chart_export(image_format='html') — the vega runtime inlines, so "
+            "the file works offline and needs no server"
+        ),
+        "notes": (
+            "The slider is a Vega-Lite param bound to a range input; the "
+            "filter transform is what makes it do anything. Pin the x scale "
+            "domain, or the axis rescales as you drag and the motion becomes "
+            "unreadable. This renders to PNG as a still at the param's "
+            "default value — for a static deliverable use small_multiples "
+            "instead."
+        ),
+        "template": {
+            "params": [
+                {
+                    "name": "cutoff",
+                    "value": 1.0,
+                    "bind": {"input": "range", "min": 0, "max": 10, "step": 0.1, "name": "time "},
+                }
+            ],
+            "transform": [{"filter": "datum.t <= cutoff"}],
+            "mark": "line",
+            "encoding": {
+                "x": {
+                    "field": "t",
+                    "type": "quantitative",
+                    "scale": {"domain": [0, 10]},
+                },
+                "y": {"field": "value", "type": "quantitative"},
+                "color": {"field": "series", "type": "nominal"},
+            },
+        },
+    },
     "line": {
         "kind": VL,
         "for": "trends over a continuous x (time, cycles, load)",

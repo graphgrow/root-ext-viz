@@ -91,6 +91,34 @@ step still wants a raised `wall_s` rather than a shrunken analysis. The
 difference is that a timeout is now a setback of one call, not of the
 whole session.
 
+## One computation, three renderings — pick by reader
+
+A time series, a parameter sweep, a set of runs: the same data wants a
+different shape depending on who is reading it. All three come out of
+tools already here, so this is a choice, not a build.
+
+**For yourself — small multiples.** `viz_recipes("small_multiples")`
+gives a faceted grid: every condition at once, on shared scales, which
+is what invites the comparison. This is the form a model can actually
+read. An animation shows one frame at a time and you cannot hold the
+others in mind while looking at it.
+
+**For a human at a desk — the time scrubber.**
+`viz_recipes("time_scrubber")` is a Vega-Lite param bound to a range
+input; `chart_export(image_format="html")` inlines the vega runtime so
+the file works offline, from a file:// URL, with no server. Note that
+rendering it to PNG gives a still at the slider's default — if the
+deliverable is static, use small multiples instead.
+
+**For the record — the numbers.** Chart last. The series itself, or a
+summary of it, is usually the thing worth keeping; a picture is how you
+notice something, not how you record it.
+
+There is deliberately no animated-GIF tool. A model reads only the first
+frame of one, so it would be a rendering for humans that costs a
+dependency and a code path — and for humans the scrubber is better,
+because they can stop on the interesting frame.
+
 ## Aggregate before you plot
 
 `chart_spec` inlines the frame into the spec and caps it at `max_rows`
