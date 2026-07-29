@@ -56,11 +56,29 @@ def test_no_inplace_mutation_tools_exist():
 def test_py_run_says_it_executes_and_names_its_bounds():
     run = next(tool for tool in list_tools() if tool.name == "py_run")
     assert "EXECUTES" in run.description
-    assert "SURVIVE" in run.description  # the sessional contract is stated
+    assert "survive to your next call" in run.description  # the sessional contract
     assert "wall_s" in run.description
+    # …and the durable half of that contract: handles in, handles out,
+    # which is what makes a killed kernel recoverable rather than fatal.
+    assert "frame_handles" in run.description
+    assert "RECOVER" in run.description
+
+
+def test_data_load_offers_the_handle_not_just_the_profile():
+    """Gap 0: a caller who never reads past the profile never learns the
+    frame is durable, so the handle has to be in the description."""
+    load = next(tool for tool in list_tools() if tool.name == "data_load")
+    assert "frame_handle" in load.description
+    assert "durable name" in load.description
+    assert "opaque" in load.description  # nothing may parse it
+    assert "ttl_ms" in load.description  # and it does not live forever
 
 
 def test_chart_spec_teaches_the_vision_loop():
     spec = next(tool for tool in list_tools() if tool.name == "chart_spec")
-    assert "LOOK" in spec.description
+    # The loop closes in ONE call now — the render is attached, not
+    # fetched — so the doctrine to pin is the attachment, not a re-read.
+    assert "ATTACHED TO THIS RESULT" in spec.description
+    assert "diagnostics" in spec.description
     assert ".vl.json" in spec.description
+    assert "fs.read" not in spec.description, "the extra round trip is gone"

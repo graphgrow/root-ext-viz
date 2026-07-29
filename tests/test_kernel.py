@@ -35,12 +35,14 @@ def test_errors_come_back_named_not_fatal():
     assert data.py_run("y = 1")["ok"]
 
 
-def test_wall_timeout_kills_and_names_the_state_loss():
-    with pytest.raises(RuntimeError, match="STATE WAS LOST"):
+def test_wall_timeout_kills_and_points_at_the_surviving_handles():
+    data.py_run("keepme = 1")
+    with pytest.raises(RuntimeError, match="frame_handles"):
         data.py_run("while True: pass", wall_s=2)
-    # The next call gets a FRESH kernel (old state gone).
+    # The next call gets a FRESH kernel — variables really are gone…
     out = data.py_run("print('alive')")
     assert out["ok"] and out["stdout"].strip() == "alive"
+    assert not data.py_run("print(keepme)")["ok"]
 
 
 def test_data_load_profiles_and_registers(tmp_path):

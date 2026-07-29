@@ -3,9 +3,10 @@ name: viz-eng
 description: >
   Operating instructions for charting with this pack — profile before you
   plot, aggregate in the session kernel before a spec, and look at the
-  rendered PNG before calling a chart done. Use when plotting data,
-  building charts or dashboards, exploring a CSV or parquet file, or
-  running Python over a dataframe.
+  render (it comes back attached to the call) plus its diagnostics before
+  calling a chart done. Use when plotting data, building charts or
+  dashboards, exploring a CSV or parquet file, or running Python over a
+  dataframe.
 paths:
   - "*.vl.json"
   - "*.csv"
@@ -28,33 +29,67 @@ deliverable.
    need the row count, the dtypes and the numeric summary before you can
    choose a chart — guessing the shape and then fixing the spec twice is
    slower than looking once.
-2. **`data_load`** it into the session kernel under a name. It starts the
-   kernel on first use and the frame survives your later calls.
+2. **`data_load`** it into the kernel under a name. Keep the
+   `frame_handle` it returns — that is the frame's durable name, and it
+   is what gets you back on your feet if the kernel dies.
 3. **`py_run`** to filter, join and aggregate. Do the reduction here.
 4. **`viz_recipes`** with a topic for a worked template if the chart
    shape is not obvious. Call it with no topic for the index.
 5. **`chart_spec`** with `data: "<frame name>"`.
-6. **`fs.read` the returned `.png` and actually look at it.** Overlapping
-   labels, a broken scale, an empty facet — none of these appear in the
-   spec. Then refine and write again.
+6. **Look at the render — it comes back attached to that same call** —
+   and read its `diagnostics`. No second read, no separate approval.
+   Then refine and write again.
 
 Step 6 is the point of the pack. A chart you have not looked at is a
 guess.
 
-## The kernel survives — and dies all at once
+### The diagnostics are not opinions
 
-Variables, imports and loaded frames persist across `py_run` calls. Load
-once, iterate cheaply.
+Every render reports on itself: label collisions, a zero baseline
+flattening a 1% spread, too many series for a legend, a constant axis, a
+missing title. These are deterministic checks against the spec and the
+rows actually inlined — a string-width calculation catches three
+overlapping x-labels exactly, where looking at a PNG catches them
+"probably". Findings carry a `fix` when there is an obvious one.
 
-But a `py_run` that exceeds its wall budget (`wall_s`, max 570 s) **kills
-the whole kernel**, not just that call. Every loaded frame and every
-variable is gone, and the error says so. After a timeout you must
-`data_load` again before anything else will work. If you are unsure what
-survived, `session_state` tells you exactly what the kernel holds.
+`severity: "warn"` means the chart is misleading or unreadable **as
+drawn**; fix it before showing the user. `note` is worth knowing. An
+empty list means the checks ran and found nothing, which is information.
 
-Long work belongs in smaller `py_run` calls for this reason — and when a
-single step is genuinely big, raise `wall_s` for that call rather than
-shrinking the analysis to fit the default.
+Use both. The diagnostics name what is fixable; the image is what makes
+an unexpected SHAPE visible — a bimodal distribution, a cliff, an outlier
+dragging a fit — and no layout check will ever tell you that.
+
+## Two kinds of state, and only one of them is fragile
+
+Variables and imports live in the kernel. **Frames live in a store, and
+have handles.** The difference matters the moment something goes wrong.
+
+`data_load` returns a `frame_handle` alongside the profile. It is opaque,
+content-addressed, and valid for `ttl_ms` (6 hours). Keep it. Every
+`py_run` returns `frame_handles` for whatever is in `DATA` afterwards,
+re-addressed if your code changed the data — so the handle for a frame
+you transformed is not the handle you started with, and *both* keep
+working. You get them back even when your code raises.
+
+A `py_run` that exceeds its wall budget (`wall_s`, max 570 s) **kills the
+whole kernel**, not just that call. Variables and imports are gone. Your
+frames are not:
+
+```
+py_run(code, frame_handles={"sizing": "fr_ae6caa3c3c5539b6"})
+```
+
+That puts the frame back in `DATA["sizing"]` before your code runs, and
+you carry on. `session_state` lists `stored_handles` whenever you are
+unsure what survived — including when the kernel is not running at all.
+`chart_spec(data=<handle>)` works the same way, reading from the store,
+so a chart draws even with no kernel alive.
+
+Long work still belongs in smaller `py_run` calls, and a genuinely big
+step still wants a raised `wall_s` rather than a shrunken analysis. The
+difference is that a timeout is now a setback of one call, not of the
+whole session.
 
 ## Aggregate before you plot
 

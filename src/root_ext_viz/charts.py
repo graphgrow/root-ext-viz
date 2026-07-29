@@ -18,6 +18,11 @@ from . import files, kernel
 SCHEMA_V6 = "https://vega.github.io/schema/vega-lite/v6.json"
 MAX_SPEC_BYTES = 2_000_000
 RENDER_SCALE = 2.0
+# The ceiling for the image that rides back INLINE (the file on disk is
+# never downscaled). Roughly 250 KB of PNG ≈ 340 KB of base64 — large
+# enough for a dense chart to stay legible, small enough that charting in
+# a loop does not evict the conversation.
+MAX_INLINE_PNG_BYTES = 250_000
 
 
 def _validated_spec(spec) -> dict:
@@ -32,11 +37,38 @@ def _validated_spec(spec) -> dict:
     return spec
 
 
-def _render_png(spec: dict, out_path: Path) -> None:
+def _render_png(spec: dict, out_path: Path) -> bytes:
+    """Render, write, and hand the bytes BACK — the caller returns them
+    inline as an image content block. Rendering twice to avoid passing
+    bytes around would double the cost of every chart."""
     import vl_convert as vlc
 
     png = vlc.vegalite_to_png(json.dumps(spec), scale=RENDER_SCALE)
     out_path.write_bytes(png)
+    return png
+
+
+def _thumbnail(png: bytes, spec: dict) -> bytes:
+    """A copy of the render bounded for the wire. The file on disk keeps
+    full RENDER_SCALE fidelity; what rides back inline only has to be
+    legible, and an unbounded image content block is a context bomb — a
+    2x-scale chart of a dense scatter can run past a megabyte, which
+    base64 then inflates by a third."""
+    if len(png) <= MAX_INLINE_PNG_BYTES:
+        return png
+    import vl_convert as vlc
+
+    payload = json.dumps(spec)
+    smallest = png
+    for scale in (1.0, 0.75, 0.5):
+        smaller = vlc.vegalite_to_png(payload, scale=scale)
+        smallest = smaller
+        if len(smaller) <= MAX_INLINE_PNG_BYTES:
+            break
+    # Even the smallest render can exceed the cap for a genuinely dense
+    # chart. Send it anyway: a chart too big to look at comfortably still
+    # beats no chart, and the full-fidelity file is on disk regardless.
+    return smallest
 
 
 def chart_spec(
@@ -45,9 +77,10 @@ def chart_spec(
     out_dir: str,
     data: str | None = None,
     max_rows: int = 5000,
-) -> dict:
+) -> tuple[dict, bytes]:
     """Write <name>.vl.json + <name>.png into out_dir; `data` inlines a
-    loaded kernel frame into the spec."""
+    loaded kernel frame into the spec. Returns the report AND the PNG
+    bytes, so the caller can hand the image straight back."""
     spec = _validated_spec(spec)
     stem = files.safe_stem(name)
     target = Path(out_dir).expanduser()
@@ -55,13 +88,19 @@ def chart_spec(
 
     clipped = False
     total_rows = None
+    values: list | None = None
     if data:
         reply = kernel.request({"op": "values", "name": data, "max_rows": max_rows})
         if not reply.get("ok"):
             raise ValueError(reply.get("error", "loading the frame's values failed"))
-        spec["data"] = {"values": reply["values"]}
+        values = reply["values"]
+        spec["data"] = {"values": values}
         clipped = bool(reply.get("clipped"))
         total_rows = reply.get("total_rows")
+    elif isinstance(spec.get("data"), dict):
+        inline = spec["data"].get("values")
+        if isinstance(inline, list):
+            values = inline
 
     raw = json.dumps(spec, indent=2)
     if len(raw) > MAX_SPEC_BYTES:
@@ -73,21 +112,29 @@ def chart_spec(
     spec_path = target / f"{stem}.vl.json"
     png_path = target / f"{stem}.png"
     spec_path.write_text(raw)
-    _render_png(spec, png_path)
+    png = _render_png(spec, png_path)
 
+    from . import critique as critique_mod
+
+    findings = critique_mod.critique(spec, values)
     report = {
         "written": [
             {"path": str(spec_path), "kind": "spec"},
             {"path": str(png_path), "kind": "render"},
         ],
+        "diagnostics": findings,
         "note": (
-            "Read the .png with fs.read to LOOK at the chart and refine the "
-            "spec; the .vl.json is the editable document the user keeps."
+            "The render is attached to this result — look at it. The .vl.json "
+            "beside it is the editable document the user keeps."
+            if not findings
+            else "The render is attached to this result. The diagnostics above "
+            "are deterministic layout checks, not opinions — a `warn` means "
+            "the chart is misleading or unreadable as drawn."
         ),
     }
     if clipped:
         report["data_clipped"] = f"first {max_rows} of {total_rows} rows inlined"
-    return report
+    return report, _thumbnail(png, spec)
 
 
 def chart_export(

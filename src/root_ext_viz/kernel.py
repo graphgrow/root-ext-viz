@@ -105,8 +105,10 @@ def request(payload: dict, wall_s: float = DEFAULT_WALL_S) -> dict:
             _child = None
             raise RuntimeError(
                 f"the call exceeded its {wall_s:.0f}s wall and the kernel was "
-                "stopped — SESSION STATE WAS LOST; data_load again and retry "
-                "with smaller steps"
+                "stopped — variables and imports are gone, but LOADED FRAMES "
+                "ARE NOT: call session_state for their handles and pass them "
+                "to py_run's `frame_handles` to carry on. Retry in smaller "
+                "steps or raise wall_s."
             ) from None
         except (BrokenPipeError, RuntimeError) as exc:
             _kill(child)
@@ -114,7 +116,8 @@ def request(payload: dict, wall_s: float = DEFAULT_WALL_S) -> dict:
             if isinstance(exc, RuntimeError):
                 raise
             raise RuntimeError(
-                "the kernel died mid-call — session state was lost; data_load again"
+                "the kernel died mid-call — variables are gone; session_state "
+                "lists the frame handles that survived it"
             ) from None
 
 

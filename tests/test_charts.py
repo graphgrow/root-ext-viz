@@ -26,14 +26,27 @@ SPEC = {
 
 
 def test_chart_spec_writes_document_and_render(tmp_path):
-    report = charts.chart_spec(SPEC, "loads", str(tmp_path))
+    report, inline = charts.chart_spec(SPEC, "loads", str(tmp_path))
     paths = [w["path"] for w in report["written"]]
     assert paths == [str(tmp_path / "loads.vl.json"), str(tmp_path / "loads.png")]
     saved = json.loads((tmp_path / "loads.vl.json").read_text())
     assert saved["$schema"].endswith("v6.json")  # pinned to the viewer's major
     png = (tmp_path / "loads.png").read_bytes()
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
-    assert "LOOK" in report["note"]
+    # The bytes come BACK as well as landing on disk — the whole of P1.
+    assert inline[:8] == b"\x89PNG\r\n\x1a\n"
+    assert "attached" in report["note"]
+    assert isinstance(report["diagnostics"], list)
+
+
+def test_the_inline_render_is_bounded_but_the_file_is_not(tmp_path, monkeypatch):
+    """A chart returned inline is context the caller pays for, so it is
+    capped; the document on disk keeps full fidelity regardless."""
+    monkeypatch.setattr(charts, "MAX_INLINE_PNG_BYTES", 1)
+    report, inline = charts.chart_spec(SPEC, "big", str(tmp_path))
+    on_disk = (tmp_path / "big.png").read_bytes()
+    assert len(inline) < len(on_disk), "the inline copy was scaled down"
+    assert inline[:8] == b"\x89PNG\r\n\x1a\n", "and is still a PNG"
 
 
 def test_chart_spec_inlines_a_kernel_frame_with_caps(tmp_path):
@@ -47,7 +60,7 @@ def test_chart_spec_inlines_a_kernel_frame_with_caps(tmp_path):
             "y": {"field": "y", "type": "quantitative"},
         },
     }
-    report = charts.chart_spec(spec, "curve", str(tmp_path), data="d", max_rows=10)
+    report, _ = charts.chart_spec(spec, "curve", str(tmp_path), data="d", max_rows=10)
     assert report["data_clipped"] == "first 10 of 50 rows inlined"
     saved = json.loads((tmp_path / "curve.vl.json").read_text())
     assert len(saved["data"]["values"]) == 10

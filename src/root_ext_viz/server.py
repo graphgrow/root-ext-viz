@@ -6,13 +6,27 @@ governance (the client classifies tools from the annotations below,
 fail-safe, and gates accordingly).
 
 The design (agreed with the user, 2026-07-18) is five pillars:
-a SESSIONAL KERNEL (dataframes and imports survive across calls — load
+a SESSIONAL KERNEL (imports and variables survive across calls — load
 once, iterate), CHARTS AS SOURCE DOCUMENTS (.vl.json specs the
 workspace renders live; pixels are derived beside them), the VISION
-LOOP (every render returns its png path — read it, look, refine),
-RECIPES AS PROMPT SURFACE (one read tool, not 25 chart tools), and
-BOUNDED DATA PLUMBING (profile → aggregate in the kernel → only
+LOOP, RECIPES AS PROMPT SURFACE (one read tool, not 25 chart tools),
+and BOUNDED DATA PLUMBING (profile → aggregate in the kernel → only
 summaries enter a spec).
+
+The vision loop closes IN ONE CALL (gap plan, Gap 5): a render comes
+back attached to the result that produced it, beside deterministic
+diagnostics about its own layout. The original shape returned a path and
+told the caller to go read it — three round trips and a second approval
+surface for one chart, which is why the loop so often didn't close at
+all. A tool that can already see the pixels it just made has no business
+asking the model to fetch them.
+
+And the kernel's frames are no longer implicit session state (gap plan,
+Gap 0): every loaded frame is content-addressed into a store and named
+by an opaque `frame_handle` the caller passes back as an ordinary tool
+argument — MCP 2026-07-28's sanctioned replacement for sessions
+(SEP-2567), and, more immediately, the reason a wall-timeout now costs
+one call instead of the whole analysis. See `frames.py`.
 
 Annotation contract (matches the classifier in the ROOT client):
 - Read tools: ``readOnlyHint=True, openWorldHint=False``.
@@ -33,10 +47,39 @@ fast.
 
 from __future__ import annotations
 
+import base64
+import json
+
 from mcp.server.fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
 mcp = FastMCP("viz-eng")
+
+
+def _seen(report: dict, png: bytes) -> CallToolResult:
+    """A rendered chart, returned so the caller can SEE it (pillar C).
+
+    The old shape wrote a PNG and told the caller to go read it: three
+    round trips and a second permission surface for one chart, which is
+    why the vision loop rarely actually closed. One `CallToolResult`
+    carries the image, the report as text, and the report again as
+    `structuredContent` — hosts that render images get the picture,
+    hosts that only read text still get every path and finding.
+
+    The image goes FIRST: a client that truncates a long content array
+    keeps the thing that cannot be reconstructed from the other blocks.
+    """
+    return CallToolResult(
+        content=[
+            ImageContent(
+                type="image",
+                data=base64.b64encode(png).decode("ascii"),
+                mimeType="image/png",
+            ),
+            TextContent(type="text", text=json.dumps(report, indent=2)),
+        ],
+        structuredContent=report,
+    )
 
 _READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 _SESSION_WRITE = ToolAnnotations(
@@ -63,10 +106,15 @@ def data_profile(path: str) -> dict:
 
 @mcp.tool(annotations=_SESSION_WRITE)
 def data_load(path: str, name: str) -> dict:
-    """Load a data file into the SESSION KERNEL as DATA[name] — loaded
-    once, it survives across calls: transform it with py_run, chart it
-    with chart_spec(data=name). Starts the kernel on first use.
-    Returns the loaded frame's profile."""
+    """Load a data file into the session kernel as DATA[name] — loaded
+    once, use it many times: transform with py_run, chart with
+    chart_spec(data=name). Starts the kernel on first use.
+
+    RETURNS A `frame_handle` as well as the profile. The handle is the
+    durable name for this frame: it is written to a store that outlives
+    the kernel, so if a wall-timeout kills the interpreter you can pass
+    the handle back to py_run's `frame_handles` and carry on instead of
+    reloading. Treat it as opaque; it is valid for `ttl_ms`."""
     from . import data
 
     return data.data_load(path, name)
@@ -74,27 +122,38 @@ def data_load(path: str, name: str) -> dict:
 
 @mcp.tool(annotations=_READ)
 def session_state() -> dict:
-    """What the session kernel holds right now: loaded frames (rows ×
-    columns) and user variables. The kernel survives across your calls;
-    a wall-timeout or session_reset empties it."""
+    """What the kernel holds right now — loaded frames (rows × columns,
+    each with its `frame_handle`) and user variables — plus
+    `stored_handles`, the frames that survive the kernel. A wall-timeout
+    or session_reset empties the first list and leaves the second."""
     from . import data
 
     return data.session_state()
 
 
 @mcp.tool(annotations=_SESSION_WRITE)
-def py_run(code: str, wall_s: float = 60.0) -> dict:
-    """EXECUTES Python in the persistent session kernel — pandas,
-    numpy, scipy, matplotlib (Agg), plotly, altair are importable;
-    DATA holds loaded frames; variables and imports SURVIVE to your
-    next call. Use it to transform/aggregate before charting, or run a
-    python recipe (matplotlib figures: savefig to an absolute path in
-    the artifact scratch). Resource-capped (memory rlimit + your
-    wall_s, max 570s); a timeout kills the kernel and names the state
-    loss. stdout/stderr come back bounded."""
+def py_run(
+    code: str,
+    wall_s: float = 60.0,
+    frame_handles: dict | None = None,
+) -> dict:
+    """EXECUTES Python in the session kernel — pandas, numpy, scipy,
+    matplotlib (Agg), plotly, altair are importable; DATA holds loaded
+    frames; variables and imports survive to your next call. Use it to
+    transform/aggregate before charting, or run a python recipe
+    (matplotlib figures: savefig to an absolute path in the artifact
+    scratch). Resource-capped (memory rlimit + your wall_s, max 570s).
+
+    Pass `frame_handles` as {name: handle} to put stored frames back in
+    DATA before the code runs — this is how you RECOVER after a timeout
+    killed the kernel, and how any call gets a frame it did not load
+    itself. Returns `frame_handles` for every frame in DATA afterwards,
+    re-addressed if your code changed them, so the next call always has
+    a durable name for the work this one did. You get them back even
+    when the code raises. stdout/stderr come back bounded."""
     from . import data
 
-    return data.py_run(code, wall_s)
+    return data.py_run(code, wall_s, frame_handles)
 
 
 @mcp.tool(annotations=_SESSION_WRITE)
@@ -116,17 +175,24 @@ def chart_spec(
     out_dir: str,
     data: str | None = None,
     max_rows: int = 5000,
-) -> dict:
+) -> CallToolResult:
     """Write a Vega-Lite chart as a SOURCE DOCUMENT: <name>.vl.json +
     a rendered <name>.png land in out_dir (use the artifact scratch
     when the user asked to SEE it — the workspace opens it beside the
-    conversation, live and editable). Pass data=<kernel frame name> to
-    inline a loaded frame (capped at max_rows — aggregate big data in
-    the kernel first). Then fs.read the .png to LOOK at your chart and
-    refine the spec. Rendering is local (vl-convert, Vega-Lite v6)."""
+    conversation, live and editable). Pass data=<kernel frame name OR
+    frame_handle> to inline a frame (capped at max_rows — aggregate big
+    data in the kernel first); a handle reads from the store, so it
+    charts even after the kernel that made it died. THE RENDER COMES
+    BACK ATTACHED TO THIS RESULT —
+    look at it directly, no second read — alongside `diagnostics`,
+    deterministic layout checks (label collisions, a zero baseline
+    flattening the data, too many series) that name defects the image
+    alone makes you squint for. Rendering is local (vl-convert,
+    Vega-Lite v6)."""
     from . import charts
 
-    return charts.chart_spec(spec, name, out_dir, data, max_rows)
+    report, png = charts.chart_spec(spec, name, out_dir, data, max_rows)
+    return _seen(report, png)
 
 
 @mcp.tool(annotations=_DERIVED_WRITE)
