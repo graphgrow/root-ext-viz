@@ -50,13 +50,18 @@ def main() -> int:
     args = parser.parse_args()
 
     version = _project_version()
-    wheel = ROOT / "dist" / f"root_ext_viz-{version}-py3-none-any.whl"
-    if not wheel.is_file():
+    # The pack ships the COMPILED wheel (ADR-0097): `uv build` makes the
+    # pure one, root-packs/tools/compile_wheel.py makes this one from it.
+    # Exactly one, by exact version: never the pure wheel, never a guess.
+    wheels = sorted((ROOT / "dist").glob(f"root_ext_viz-{version}-cp312-abi3-*.whl"))
+    if len(wheels) != 1:
         print(
-            f"no wheel for {version} in dist/ — run `uv build` first",
+            f"need exactly one compiled wheel for {version} in dist/ (found "
+            f"{len(wheels)}) — run `uv build`, then root-packs/tools/compile_wheel.py",
             file=sys.stderr,
         )
         return 1
+    wheel = wheels[0]
     sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
 
     # A stale wheel in dist/ is packaged silently: bump the version, forget

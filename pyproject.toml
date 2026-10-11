@@ -1,6 +1,6 @@
 [project]
 name = "root-ext-viz"
-version = "0.4.0"
+version = "0.5.0"
 description = "Data-visualization MCP tool server: a sessional Python kernel (pandas/numpy/scipy/matplotlib/plotly/altair), Vega-Lite charts as source documents rendered locally by vl-convert, and engineering chart recipes. Compute and plot; outputs land only in derived or artifact directories."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -42,6 +42,15 @@ artifacts = ["src/root_ext_viz/SKILL.md"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/root_ext_viz"]
+
+# The shipped wheel is compiled (ADR-0097, root-packs/tools/compile_wheel.py).
+# `__init__` and the server module stay source on their own; these too:
+[tool.root-pack.compile]
+keep-source = [
+    # Started as `python -m root_ext_viz._kernel_child`, and runpy cannot
+    # run an extension module as __main__.
+    "root_ext_viz._kernel_child",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
